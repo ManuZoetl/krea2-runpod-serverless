@@ -16,15 +16,17 @@ jobs:
       packages: write
 
     steps:
-      # 1. Aggressivste Linux-Bereinigung, um das Root-System maximal zu leeren
+      # 1. FEHLERBEHEBUNG: Nutzung der korrekten, existierenden Free-Disk-Space Action
       - name: Free Disk Space (Ubuntu)
-        uses: skx/github-action-free-disk-space@main
+        uses: jlumbroso/free-disk-space@v1.3.1
         with:
-          remove-dotnet: "true"
-          remove-android: "true"
-          remove-haskell: "true"
-          remove-codeql: "true"
-          remove-docker-images: "true"
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
 
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -33,7 +35,7 @@ jobs:
         run: |
           echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
 
-      # 2. Modell-Download außerhalb von Docker auf dem Runner ausführen
+      # 2. Modell-Download direkt auf den bereinigten Runner ausführen
       - name: Install Python dependencies on Runner
         run: pip3 install huggingface_hub
 
@@ -57,7 +59,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 4. Standard Docker Build & Push ausführen (Docker muss nichts mehr downloaden!)
+      # 4. Standard Docker Build & Push ausführen (Kein temporärer Download-Overhead in Docker!)
       - name: Build and Push Image
         run: |
           docker build \
