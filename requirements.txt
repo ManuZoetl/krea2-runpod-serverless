@@ -1,0 +1,7 @@
+runpod>=1.7.0
+diffusers
+transformers
+accelerate
+safetensors
+huggingface_hub
+pillow
