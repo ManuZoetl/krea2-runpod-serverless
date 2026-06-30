@@ -6,9 +6,12 @@ RUN pip3 install runpod diffusers transformers torch accelerate huggingface_hub
 
 COPY download_models.py .
 
-# Nutzt das GitHub-Secret sicher während des Build-Vorgangs, ohne es im Image zu speichern
-RUN --mount=type=secret,id=hf_token \
-    HF_TOKEN=$(cat /run/secrets/hf_token) python3 download_models.py
+# Akzeptiert das Token als Build-Argument während GitHub das Image baut
+ARG HF_TOKEN
+ENV HF_TOKEN=${HF_TOKEN}
+
+# Führt das Skript aus
+RUN python3 download_models.py
 
 COPY handler.py .
 
