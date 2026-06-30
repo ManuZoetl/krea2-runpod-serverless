@@ -16,12 +16,9 @@ jobs:
       packages: write
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      # FEHLERBEHEBUNG: Schafft ~30-40 GB freien Speicherplatz auf dem Runner
+      # 1. FEHLERBEHEBUNG: Der korrekte Name der Speicher-Action (easimon statt easibuild)
       - name: Maximize Build Space
-        uses: easibuild/maximize-build-space@v10
+        uses: easimon/maximize-build-space@v10
         with:
           root-reserve-mb: 5120
           swap-size-mb: 1024
@@ -31,8 +28,8 @@ jobs:
           remove-codeql: 'true'
           remove-docker-images: 'true'
 
-      # Wichtig: Nach dem Bereinigen den Checkout-Pfad wiederherstellen
-      - name: Checkout Code Again
+      # 2. Erst NACH dem Partitionieren checken wir den Code aus, damit er auf der neuen, großen Partition landet
+      - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Downcase repository name
