@@ -1,13 +1,24 @@
 FROM runpod/base:0.4.0-cuda11.8.0
 
-RUN apt-get update && apt-get install -y git python3-pip
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    DIFFUSERS_OFFLINE=1 \
+    RUNPOD_INIT_TIMEOUT=800
 
+WORKDIR /
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt /requirements.txt
 RUN python3 -m pip install --upgrade pip && \
-    python3 -m pip install runpod diffusers transformers torch accelerate huggingface_hub
+    python3 -m pip install -r /requirements.txt
 
-# Fehlerbehebung: Wir KOPIEREN das lokal heruntergeladene Modell einfach in den Container
-COPY models/krea2 /models/krea2
+COPY handler.py /handler.py
 
-COPY handler.py .
-
-CMD [ "python3", "-u", "/handler.py" ]
+CMD ["python3", "-u", "/handler.py"]
