@@ -39,8 +39,8 @@ jobs:
           context: .
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          # HIER WIRD DAS HF-TOKEN ALS GEHEIMNIS ÜBERGEBEN
-          secrets: |
-            hf_token=${{ secrets.HF_TOKEN }}
+          # Übergibt das GitHub-Secret als Build-Argument an Docker
+          build-args: |
+            HF_TOKEN=${{ secrets.HF_TOKEN }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
