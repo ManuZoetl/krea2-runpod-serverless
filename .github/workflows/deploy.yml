@@ -19,6 +19,22 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # FEHLERBEHEBUNG: Schafft ~30-40 GB freien Speicherplatz auf dem Runner
+      - name: Maximize Build Space
+        uses: easibuild/maximize-build-space@v10
+        with:
+          root-reserve-mb: 5120
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      # Wichtig: Nach dem Bereinigen den Checkout-Pfad wiederherstellen
+      - name: Checkout Code Again
+        uses: actions/checkout@v4
+
       - name: Downcase repository name
         run: |
           echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
@@ -39,7 +55,6 @@ jobs:
           context: .
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          # Übergibt das GitHub-Secret als Build-Argument an Docker
           build-args: |
             HF_TOKEN=${{ secrets.HF_TOKEN }}
           cache-from: type=gha
