@@ -19,7 +19,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Wandelt den Pfad (z. B. ManuZoetl/repo) zuverlässig in Kleinbuchstaben um
       - name: Downcase repository name
         run: |
           echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
@@ -39,7 +38,9 @@ jobs:
         with:
           context: .
           push: true
-          # HIER WAR DER FEHLER: Jetzt korrekt mit nur einem "env." angegeben
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          # HIER WIRD DAS HF-TOKEN ALS GEHEIMNIS ÜBERGEBEN
+          secrets: |
+            hf_token=${{ secrets.HF_TOKEN }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
