@@ -16,19 +16,16 @@ jobs:
       packages: write
 
     steps:
-      # 1. Festplatte maximal vergrößern und auf /mnt mounten
-      - name: Maximize Build Space
-        uses: easimon/maximize-build-space@v10
+      # 1. Aggressivste Linux-Bereinigung, um das Root-System maximal zu leeren
+      - name: Free Disk Space (Ubuntu)
+        uses: skx/github-action-free-disk-space@main
         with:
-          root-reserve-mb: 5120
-          swap-size-mb: 1024
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
-          remove-docker-images: 'true'
+          remove-dotnet: "true"
+          remove-android: "true"
+          remove-haskell: "true"
+          remove-codeql: "true"
+          remove-docker-images: "true"
 
-      # 2. Code auschecken
       - name: Checkout Code
         uses: actions/checkout@v4
 
@@ -36,17 +33,23 @@ jobs:
         run: |
           echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
 
-      # 3. Docker-Daemon stoppen und auf die große /mnt Partition verschieben
-      - name: Move Docker Storage to Large Partition
-        run: |
-          sudo systemctl stop docker
-          sudo mkdir -p /mnt/docker
-          sudo rsync -aqxP /var/lib/docker/ /mnt/docker/
-          echo '{"data-root": "/mnt/docker"}' | sudo tee /etc/docker/daemon.json
-          sudo systemctl start docker
-          docker info | grep "Docker Root Dir"
+      # 2. Modell-Download außerhalb von Docker auf dem Runner ausführen
+      - name: Install Python dependencies on Runner
+        run: pip3 install huggingface_hub
 
-      # 4. Bei der GitHub Container Registry anmelden
+      - name: Download Krea 2 Weights directly to Runner Workspace
+        run: |
+          mkdir -p ./models/krea2
+          python3 -c "
+          from huggingface_hub import snapshot_download
+          snapshot_download(
+              repo_id='krea/Krea-2-Turbo',
+              local_dir='./models/krea2',
+              token='${{ secrets.HF_TOKEN }}'
+          )
+          "
+
+      # 3. Bei der GitHub Container Registry anmelden
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -54,12 +57,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 5. Natives Docker Build und Push ausführen
-      - name: Build and Push Image Natively
+      # 4. Standard Docker Build & Push ausführen (Docker muss nichts mehr downloaden!)
+      - name: Build and Push Image
         run: |
           docker build \
             --no-cache \
-            --build-arg HF_TOKEN="${{ secrets.HF_TOKEN }}" \
             -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest .
           
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
