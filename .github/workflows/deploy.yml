@@ -36,15 +36,14 @@ jobs:
         run: |
           echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
 
-      # 3. FEHLERBEHEBUNG: BuildKit anweisen, den großen Workspace für temporäre Daten zu nutzen
+      # 3. FEHLERBEHEBUNG: Richtige Syntax für Inline-Konfiguration & Treiber-Wechsel
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
-          driver-opts: |
-            env.BUILDKIT_STEP_LOG_MAX_SIZE=50000000
-            image=moby/buildkit:master
-          # Zwingt Buildx dazu, nicht die kleine Systempartition zu sprengen
-          buildkitd-config: |
+          # Nutzt den isolierten Container-Treiber, der die große Partition voll ausnutzt
+          driver: docker-container
+          # Korrigiertes Feld für den Text-Block (config-inline statt buildkitd-config)
+          config-inline: |
             [worker.oci]
               max-parallelism = 1
 
@@ -55,7 +54,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 4. Image bauen (Ohne GHA-Cache, da der Cache selbst Speicher auf dem Runner frisst)
+      # 4. Image bauen (Ohne GHA-Cache, um Platz zu sparen)
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v5
         with:
@@ -64,5 +63,4 @@ jobs:
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           build-args: |
             HF_TOKEN=${{ secrets.HF_TOKEN }}
-          # FEHLERBEHEBUNG: Cache deaktivieren, um wertvollen Festplattenplatz zu sparen
           no-cache: true
