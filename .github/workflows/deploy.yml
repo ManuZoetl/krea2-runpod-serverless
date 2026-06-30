@@ -1,9 +1,10 @@
-name: Build and Push Krea 2 to GHCR
+name: Build and Push Krea 2 Worker
 
 on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
@@ -16,42 +17,15 @@ jobs:
       packages: write
 
     steps:
-      # 1. FEHLERBEHEBUNG: Nutzung der korrekten, existierenden Free-Disk-Space Action
-      - name: Free Disk Space (Ubuntu)
-        uses: jlumbroso/free-disk-space@v1.3.1
-        with:
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: true
-
-      - name: Checkout Code
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Downcase repository name
-        run: |
-          echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+        run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
-      # 2. Modell-Download direkt auf den bereinigten Runner ausführen
-      - name: Install Python dependencies on Runner
-        run: pip3 install huggingface_hub
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Download Krea 2 Weights directly to Runner Workspace
-        run: |
-          mkdir -p ./models/krea2
-          python3 -c "
-          from huggingface_hub import snapshot_download
-          snapshot_download(
-              repo_id='krea/Krea-2-Turbo',
-              local_dir='./models/krea2',
-              token='${{ secrets.HF_TOKEN }}'
-          )
-          "
-
-      # 3. Bei der GitHub Container Registry anmelden
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -59,11 +33,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 4. Standard Docker Build & Push ausführen (Kein temporärer Download-Overhead in Docker!)
-      - name: Build and Push Image
-        run: |
-          docker build \
-            --no-cache \
-            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest .
-          
-          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
