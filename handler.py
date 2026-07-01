@@ -14,15 +14,11 @@ MODEL_ID = os.getenv("MODEL_ID", "krea/krea-2-turbo")
 MODEL_PATH = os.getenv("MODEL_PATH", "").strip()
 HF_CACHE_ROOT = Path(os.getenv("HF_CACHE_ROOT", "/runpod-volume/huggingface-cache/hub"))
 ALLOW_RUNTIME_DOWNLOAD = os.getenv("ALLOW_RUNTIME_DOWNLOAD", "0") == "1"
+LOAD_STRATEGY = os.getenv("LOAD_STRATEGY", "cpu_offload").strip().lower()
 
 
 def _candidate_model_ids(model_id: str) -> list[str]:
-    """Return likely repo-id spellings that can map to RunPod/HF cache dirs.
-
-    Hugging Face repo IDs are often shown with lowercase names in RunPod's UI.
-    Linux cache paths are case-sensitive, so krea/Krea-2-Turbo and
-    krea/krea-2-turbo resolve to different folder names.
-    """
+    """Return likely repo-id spellings that can map to RunPod/HF cache dirs."""
     candidates = [model_id]
 
     lower = model_id.lower()
@@ -34,7 +30,6 @@ def _candidate_model_ids(model_id: str) -> list[str]:
     elif model_id == "krea/krea-2-turbo":
         candidates.append("krea/Krea-2-Turbo")
 
-    # Preserve order while removing duplicates.
     return list(dict.fromkeys(candidates))
 
 
@@ -58,11 +53,7 @@ def _debug_cache_snapshot_dirs() -> list[str]:
 
 
 def resolve_cached_model_path(model_id: str) -> str:
-    """Resolve RunPod's Hugging Face cached model directory.
-
-    RunPod cached models usually appear under:
-      /runpod-volume/huggingface-cache/hub/models--ORG--NAME/snapshots/HASH/
-    """
+    """Resolve RunPod's Hugging Face cached model directory."""
     if MODEL_PATH:
         path = Path(MODEL_PATH)
         if path.exists():
@@ -78,7 +69,6 @@ def resolve_cached_model_path(model_id: str) -> str:
             print(f"✅ Found cached model for {candidate}")
             return snapshots[-1]
 
-    # Fallback: if RunPod mounted exactly one HF snapshot, use it and print it.
     all_snapshots = _debug_cache_snapshot_dirs()
     if len(all_snapshots) == 1:
         print(f"✅ Found one cached HF snapshot fallback: {all_snapshots[0]}")
@@ -102,17 +92,55 @@ def resolve_cached_model_path(model_id: str) -> str:
     )
 
 
+def _print_runtime_debug() -> None:
+    print(f"🐍 torch={torch.__version__}")
+    print(f"🧩 cuda_available={torch.cuda.is_available()}")
+    print(f"🧩 torch_cuda={getattr(torch.version, 'cuda', None)}")
+    if torch.cuda.is_available():
+        print(f"🧩 cuda_device_count={torch.cuda.device_count()}")
+        print(f"🧩 cuda_device_name={torch.cuda.get_device_name(0)}")
+    print(f"🧠 LOAD_STRATEGY={LOAD_STRATEGY}")
+
+
+def _load_pipeline(model_path: str):
+    common_kwargs = {
+        "torch_dtype": torch.float16,
+        "local_files_only": not ALLOW_RUNTIME_DOWNLOAD,
+    }
+
+    if LOAD_STRATEGY == "device_map":
+        print("🚚 Loading pipeline with device_map=balanced")
+        return DiffusionPipeline.from_pretrained(
+            model_path,
+            device_map="balanced",
+            low_cpu_mem_usage=True,
+            **common_kwargs,
+        )
+
+    pipe = DiffusionPipeline.from_pretrained(model_path, **common_kwargs)
+
+    if LOAD_STRATEGY == "cuda":
+        print("🚚 Moving full pipeline to CUDA")
+        pipe.to("cuda")
+    elif LOAD_STRATEGY == "cpu_offload":
+        print("🚚 Enabling model CPU offload")
+        pipe.enable_model_cpu_offload()
+    else:
+        raise RuntimeError(
+            f"Unsupported LOAD_STRATEGY={LOAD_STRATEGY}. "
+            "Use cpu_offload, device_map, or cuda."
+        )
+
+    return pipe
+
+
 print("⚡ Cold start: resolving cached Krea 2 model...")
 startup_started = time.time()
 resolved_model_path = resolve_cached_model_path(MODEL_ID)
 print(f"📦 Loading model from: {resolved_model_path}")
+_print_runtime_debug()
 
-pipe = DiffusionPipeline.from_pretrained(
-    resolved_model_path,
-    torch_dtype=torch.float16,
-    local_files_only=not ALLOW_RUNTIME_DOWNLOAD,
-)
-pipe.to("cuda")
+pipe = _load_pipeline(resolved_model_path)
 
 startup_seconds = round(time.time() - startup_started, 2)
 print(f"✅ Krea 2 worker ready in {startup_seconds}s")
@@ -128,6 +156,9 @@ def handler(job):
             "model_path": resolved_model_path,
             "startup_seconds": startup_seconds,
             "cuda_available": torch.cuda.is_available(),
+            "load_strategy": LOAD_STRATEGY,
+            "torch": torch.__version__,
+            "torch_cuda": getattr(torch.version, "cuda", None),
         }
 
     prompt = job_input.get("prompt", "A beautiful digital artwork")
@@ -139,7 +170,7 @@ def handler(job):
     seed = job_input.get("seed")
 
     generator = None
-    if seed is not None:
+    if seed is not None and torch.cuda.is_available():
         generator = torch.Generator(device="cuda").manual_seed(int(seed))
 
     infer_started = time.time()
@@ -158,7 +189,8 @@ def handler(job):
     if generator is not None:
         kwargs["generator"] = generator
 
-    image = pipe(**kwargs).images[0]
+    with torch.inference_mode():
+        image = pipe(**kwargs).images[0]
 
     buffer = io.BytesIO()
     image.save(buffer, format="JPEG", quality=95)
