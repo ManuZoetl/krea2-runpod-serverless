@@ -10,16 +10,57 @@ import torch
 from diffusers import DiffusionPipeline
 
 
-MODEL_ID = os.getenv("MODEL_ID", "krea/Krea-2-Turbo")
+MODEL_ID = os.getenv("MODEL_ID", "krea/krea-2-turbo")
 MODEL_PATH = os.getenv("MODEL_PATH", "").strip()
 HF_CACHE_ROOT = Path(os.getenv("HF_CACHE_ROOT", "/runpod-volume/huggingface-cache/hub"))
 ALLOW_RUNTIME_DOWNLOAD = os.getenv("ALLOW_RUNTIME_DOWNLOAD", "0") == "1"
 
 
+def _candidate_model_ids(model_id: str) -> list[str]:
+    """Return likely repo-id spellings that can map to RunPod/HF cache dirs.
+
+    Hugging Face repo IDs are often shown with lowercase names in RunPod's UI.
+    Linux cache paths are case-sensitive, so krea/Krea-2-Turbo and
+    krea/krea-2-turbo resolve to different folder names.
+    """
+    candidates = [model_id]
+
+    lower = model_id.lower()
+    if lower not in candidates:
+        candidates.append(lower)
+
+    if model_id == "krea/Krea-2-Turbo":
+        candidates.append("krea/krea-2-turbo")
+    elif model_id == "krea/krea-2-turbo":
+        candidates.append("krea/Krea-2-Turbo")
+
+    # Preserve order while removing duplicates.
+    return list(dict.fromkeys(candidates))
+
+
+def _snapshot_dirs_for_model_id(model_id: str) -> list[str]:
+    cache_dir = HF_CACHE_ROOT / ("models--" + model_id.replace("/", "--"))
+    return sorted(
+        glob.glob(str(cache_dir / "snapshots" / "*")),
+        key=lambda p: Path(p).stat().st_mtime,
+    )
+
+
+def _debug_cache_snapshot_dirs() -> list[str]:
+    patterns = [
+        str(HF_CACHE_ROOT / "models--*" / "snapshots" / "*"),
+        "/runpod-volume/**/snapshots/*",
+    ]
+    found: list[str] = []
+    for pattern in patterns:
+        found.extend(glob.glob(pattern, recursive=True))
+    return sorted(set(found))[:30]
+
+
 def resolve_cached_model_path(model_id: str) -> str:
     """Resolve RunPod's Hugging Face cached model directory.
 
-    RunPod cached models are mounted under:
+    RunPod cached models usually appear under:
       /runpod-volume/huggingface-cache/hub/models--ORG--NAME/snapshots/HASH/
     """
     if MODEL_PATH:
@@ -28,14 +69,20 @@ def resolve_cached_model_path(model_id: str) -> str:
             return str(path)
         raise RuntimeError(f"MODEL_PATH was set but does not exist: {path}")
 
-    cache_dir = HF_CACHE_ROOT / ("models--" + model_id.replace("/", "--"))
-    snapshots = sorted(
-        glob.glob(str(cache_dir / "snapshots" / "*")),
-        key=lambda p: Path(p).stat().st_mtime,
-    )
+    searched = []
+    for candidate in _candidate_model_ids(model_id):
+        cache_dir = HF_CACHE_ROOT / ("models--" + candidate.replace("/", "--"))
+        searched.append(str(cache_dir / "snapshots" / "*"))
+        snapshots = _snapshot_dirs_for_model_id(candidate)
+        if snapshots:
+            print(f"✅ Found cached model for {candidate}")
+            return snapshots[-1]
 
-    if snapshots:
-        return snapshots[-1]
+    # Fallback: if RunPod mounted exactly one HF snapshot, use it and print it.
+    all_snapshots = _debug_cache_snapshot_dirs()
+    if len(all_snapshots) == 1:
+        print(f"✅ Found one cached HF snapshot fallback: {all_snapshots[0]}")
+        return all_snapshots[0]
 
     if ALLOW_RUNTIME_DOWNLOAD:
         print(
@@ -45,9 +92,13 @@ def resolve_cached_model_path(model_id: str) -> str:
         return model_id
 
     raise RuntimeError(
-        f"Cached model not found for {model_id}. Expected snapshots under: "
-        f"{cache_dir}/snapshots/*. Configure the RunPod endpoint Model field to "
-        f"'{model_id}' and add a Hugging Face token if the model is gated/private."
+        "Cached model not found.\n"
+        f"MODEL_ID={model_id}\n"
+        f"HF_CACHE_ROOT={HF_CACHE_ROOT}\n"
+        f"Searched: {searched}\n"
+        f"Found snapshot dirs: {all_snapshots}\n"
+        "Set the RunPod endpoint Model field to krea/krea-2-turbo and restart the worker. "
+        "If RunPod uses a different cache path, set MODEL_PATH to the printed snapshot dir."
     )
 
 
