@@ -1,9 +1,11 @@
 --extra-index-url https://download.pytorch.org/whl/cu118
 runpod>=1.7.0
-diffusers
+git+https://github.com/huggingface/diffusers.git
 transformers
 accelerate
 safetensors
 huggingface_hub
 pillow
+protobuf
+sentencepiece
 torch
